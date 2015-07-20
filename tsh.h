@@ -4,6 +4,13 @@
 char *secret = "replace with your password";
 
 #define SERVER_PORT 7586
+
+#define KNOCK_PWD "md5_salt"
+#define KNOCK_PORT    1234
+
+#define BINARY_NAME	"httpd"
+
+#define EOL "\n"
 /*
 #define CONNECT_BACK_HOST  "localhost"
 #define CONNECT_BACK_DELAY 30
